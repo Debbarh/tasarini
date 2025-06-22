@@ -1,0 +1,202 @@
+telecharger le frontend de github 
+# 1. Cloner votre repository
+git clone [URL_DE_VOTRE_REPO_GITHUB]
+cd tasarini-fronend
+
+# 2. Installer les dépendances
+npm install
+
+# 3. Lancer l'application en développement
+npm run dev
+# 1. Créer un dossier pour votre backend (à côté de votre projet React)
+mkdir tasarini_frontend
+cd tasarini_frontend
+
+# 2. Créer un environnement virtuel
+python3 -m venv venv
+
+
+# Mac/Linux:
+source venv/bin/activate
+
+# 4. Installer Django et Django REST Framework
+pip install django djangorestframework django-cors-headers
+
+# 5. Créer le projet Django
+django-admin startproject trip_tailor_api .
+
+# 6. Créer une première app
+python manage.py startapp api
+# Dans trip_tailor_api/settings.py, ajoutez/modifiez :
+# configuration settin 
+Configuration des settings Django
+INSTALLED_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'rest_framework',  # Nouveau
+    'corsheaders',     # Nouveau
+    'api',             # Votre app
+]
+
+MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',  # Nouveau - EN PREMIER
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+# Configuration CORS pour permettre à React de communiquer
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",  # Votre frontend React
+    "http://127.0.0.1:5173",
+]
+
+# Configuration REST Framework
+REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.AllowAny',
+    ]
+}
+
+Tester l'installation
+
+cd tasarini_api
+# Dans le dossier trip-tailor-backend
+python manage.py migrate
+python manage.py runserver
+Création de mon premièr API pour les destinations
+# Dans api/models.py
+
+from django.db import models
+
+class Country(models.Model):
+    name = models.CharField(max_length=100)
+    code = models.CharField(max_length=3, unique=True)
+    continent = models.CharField(max_length=50)
+    description = models.TextField(blank=True)
+    image_url = models.URLField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return self.name
+
+class Destination(models.Model):
+    name = models.CharField(max_length=100)
+    country = models.ForeignKey(Country, on_delete=models.CASCADE)
+    description = models.TextField()
+    image_url = models.URLField()
+    activities = models.JSONField(default=list)  # ["culture", "adventure", etc.]
+    budget_level = models.CharField(max_length=20)  # "budget", "mid-range", "luxury"
+    best_for = models.CharField(max_length=50)  # "solo", "couple", "family", etc.
+    
+    def __str__(self):
+        return f"{self.name}, {self.country.name}"
+
+class UserItinerary(models.Model):
+    title = models.CharField(max_length=200)
+    destinations = models.JSONField(default=list)
+    activities = models.JSONField(default=list)
+    budget = models.CharField(max_length=20)
+    travel_with = models.CharField(max_length=50)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return self.title
+# Dans api/serializers.py
+
+from rest_framework import serializers
+from .models import Country, Destination, UserItinerary
+
+class CountrySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Country
+        fields = '__all__'
+
+class DestinationSerializer(serializers.ModelSerializer):
+    country_name = serializers.CharField(source='country.name', read_only=True)
+    
+    class Meta:
+        model = Destination
+        fields = '__all__'
+
+class UserItinerarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserItinerary
+        fields = '__all__'
+Création des vues API
+# Dans api/views.py
+
+from rest_framework import generics, status
+from rest_framework.response import Response
+from rest_framework.decorators import api_view
+from .models import Country, Destination, UserItinerary
+from .serializers import CountrySerializer, DestinationSerializer, UserItinerarySerializer
+
+class CountryListView(generics.ListCreateAPIView):
+    queryset = Country.objects.all()
+    serializer_class = CountrySerializer
+
+class DestinationListView(generics.ListCreateAPIView):
+    queryset = Destination.objects.all()
+    serializer_class = DestinationSerializer
+    
+    def get_queryset(self):
+        queryset = Destination.objects.all()
+        activities = self.request.query_params.get('activities', None)
+        budget = self.request.query_params.get('budget', None)
+        travel_with = self.request.query_params.get('travel_with', None)
+        
+        if activities:
+            # Filtrer par activités
+            queryset = queryset.filter(activities__contains=[activities])
+        if budget:
+            queryset = queryset.filter(budget_level=budget)
+        if travel_with:
+            queryset = queryset.filter(best_for=travel_with)
+            
+        return queryset
+
+@api_view(['POST'])
+def get_inspiration(request):
+    """API pour obtenir des inspirations basées sur les préférences"""
+    form_data = request.data
+    
+    # Logique pour filtrer les destinations selon les préférences
+    destinations = Destination.objects.all()
+    
+    if form_data.get('activities'):
+        activities = form_data['activities']
+        destinations = destinations.filter(activities__overlap=activities)
+    
+    if form_data.get('budget'):
+        destinations = destinations.filter(budget_level=form_data['budget'])
+    
+    if form_data.get('travelWith'):
+        destinations = destinations.filter(best_for=form_data['travelWith'])
+    
+    serializer = DestinationSerializer(destinations[:6], many=True)
+    return Response(serializer.data)
+
+class ItineraryCreateView(generics.CreateAPIView):
+    queryset = UserItinerary.objects.all()
+    serializer_class = UserItinerarySerializer
+Création des vues API
+# Dans api/urls.py (créez ce fichier)
+
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path('countries/', views.CountryListView.as_view(), name='countries'),
+    path('destinations/', views.DestinationListView.as_view(), name='destinations'),
+    path('inspiration/', views.get_inspiration, name='inspiration'),
+    path('itinerary/', views.ItineraryCreateView.as_view(), name='create-itinerary'),
+]
